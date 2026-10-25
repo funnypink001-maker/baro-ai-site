@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>문의함 | 바로쓰는 AI · 조현주</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2317325C'/%3E%3Crect x='7' y='20' width='18' height='5' fill='%23FFE45C'/%3E%3C/svg%3E">
+<style>
+  :root { --navy:#17325c; --ink:#1a1d24; --muted:#5a6372; --line:#dce1e8; --tint:#f3f5f8; --err:#b42318; }
+  [hidden] { display: none !important; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--tint); color: var(--ink); font: 16px/1.6 system-ui, -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif; word-break: keep-all; }
+  .wrap { max-width: 720px; margin: 0 auto; padding: 20px 16px 48px; }
+  h1 { font-size: 20px; margin: 4px 0 20px; color: var(--navy); }
+  button, input { font: inherit; }
+  .btn { background: var(--navy); color: #fff; border: 0; border-radius: 10px; padding: 12px 20px; font-weight: 700; cursor: pointer; min-height: 48px; }
+  .btn-line { background: #fff; color: var(--navy); border: 1px solid var(--line); }
+  :focus-visible { outline: 3px solid var(--navy); outline-offset: 2px; }
+
+  .login { background: #fff; border-radius: 12px; padding: 24px; display: grid; gap: 12px; }
+  .login input { border: 1px solid #b9c2cf; border-radius: 8px; padding: 12px 14px; min-height: 48px; }
+  .msg { margin: 0; min-height: 1.6em; color: var(--err); font-weight: 600; }
+
+  .bar { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+  .count { background: #fff; border-radius: 12px; padding: 16px 20px; flex: 1; }
+  .count b { display: block; font-size: 40px; line-height: 1.1; color: var(--navy); }
+  .count span { color: var(--muted); }
+
+  .list { display: grid; gap: 12px; }
+  .card { background: #fff; border-radius: 12px; padding: 16px 18px; border-left: 4px solid var(--line); }
+  .card.new { border-left-color: var(--navy); }
+  .card time { color: var(--muted); font-size: 14px; }
+  .card h2 { font-size: 18px; margin: 2px 0 4px; }
+  .contact { background: none; border: 0; padding: 4px 0; color: var(--navy); font-weight: 600; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; min-height: 40px; }
+  .text { white-space: pre-wrap; margin: 8px 0 12px; }
+  .states { display: flex; gap: 8px; flex-wrap: wrap; }
+  .states button { flex: 1; min-height: 44px; border-radius: 8px; border: 1px solid var(--line); background: #fff; color: var(--ink); font-weight: 600; cursor: pointer; }
+  .states button[aria-pressed="true"] { background: var(--navy); border-color: var(--navy); color: #fff; }
+  .empty { background: #fff; border-radius: 12px; padding: 24px; color: var(--muted); text-align: center; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>바로쓰는 AI 문의함</h1>
+
+  <form id="login" class="login">
+    <label for="pw">관리자 비밀번호</label>
+    <input id="pw" type="password" autocomplete="current-password" required>
+    <button class="btn" type="submit">들어가기</button>
+    <p class="msg" role="alert"></p>
+  </form>
+
+  <section id="box" hidden>
+    <div class="bar">
+      <div class="count"><b id="newCount">0</b><span>새 문의</span></div>
+      <button id="reload" class="btn btn-line" type="button">새로고침</button>
+      <button id="logout" class="btn btn-line" type="button">나가기</button>
+    </div>
+    <p class="msg" id="boxMsg" role="alert"></p>
+    <div id="list" class="list"></div>
+  </section>
+</div>
+
+<script>
+(() => {
+  const STATUSES = ['새 문의', '연락함', '완료'];
+  const KEY = 'adminPw';
+  const $ = (s) => document.querySelector(s);
+  const loginForm = $('#login'), pwInput = $('#pw'), loginMsg = loginForm.querySelector('.msg');
+  const box = $('#box'), list = $('#list'), boxMsg = $('#boxMsg');
+  const getPw = () => { try { return sessionStorage.getItem(KEY) || ''; } catch { return ''; } };
+  const setPw = (v) => { try { v ? sessionStorage.setItem(KEY, v) : sessionStorage.removeItem(KEY); } catch {} };
+
+  const api = (method, body) => fetch('/api/admin', {
+    method,
+    headers: { 'x-admin-password': getPw(), ...(body ? { 'Content-Type': 'application/json' } : {}) },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+
+  const showLogin = (text) => {
+    setPw(''); box.hidden = true; loginForm.hidden = false;
+    loginMsg.textContent = text || ''; pwInput.value = ''; pwInput.focus();
+  };
+
+  const fmt = (iso) => new Date(iso).toLocaleString('ko-KR', { month: 'long', day: 'numeric', weekday: 'short', hour: '2-digit', minute: '2-digit' });
+
+  const render = (rows) => {
+    $('#newCount').textContent = rows.filter((r) => r.status === '새 문의').length;
+    list.replaceChildren();
+    if (!rows.length) { const p = document.createElement('p'); p.className = 'empty'; p.textContent = '아직 들어온 문의가 없어요.'; list.append(p); return; }
+    for (const r of rows) {
+      const card = document.createElement('article');
+      card.className = 'card' + (r.status === '새 문의' ? ' new' : '');
+      const time = document.createElement('time'); time.textContent = fmt(r.created_at);
+      const name = document.createElement('h2'); name.textContent = r.name;
+      const contact = document.createElement('button'); contact.type = 'button'; contact.className = 'contact'; contact.textContent = r.contact;
+      contact.addEventListener('click', async () => {
+        try { await navigator.clipboard.writeText(r.contact); contact.textContent = r.contact + '  (복사됨)'; setTimeout(() => { contact.textContent = r.contact; }, 1500); }
+        catch { const s = getSelection(), rg = document.createRange(); rg.selectNodeContents(contact); s.removeAllRanges(); s.addRange(rg); }
+      });
+      const text = document.createElement('p'); text.className = 'text'; text.textContent = r.message || '(내용 없음)';
+      const states = document.createElement('div'); states.className = 'states';
+      for (const st of STATUSES) {
+        const b = document.createElement('button'); b.type = 'button'; b.textContent = st;
+        b.setAttribute('aria-pressed', String(r.status === st));
+        b.addEventListener('click', async () => {
+          if (r.status === st) return;
+          const res = await api('PATCH', { id: r.id, status: st });
+          if (res.status === 401) return showLogin('비밀번호가 맞지 않아요.');
+          if (!res.ok) { boxMsg.textContent = '바꾸지 못했어요.'; return; }
+          load();
+        });
+        states.append(b);
+      }
+      card.append(time, name, contact, text, states);
+      list.append(card);
+    }
+  };
+
+  async function load() {
+    boxMsg.textContent = '';
+    const res = await api('GET');
+    if (res.status === 401) return showLogin('비밀번호가 맞지 않아요.');
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) { loginForm.hidden = true; box.hidden = false; boxMsg.textContent = d.error || '불러오지 못했어요.'; return; }
+    loginForm.hidden = true; box.hidden = false; loginMsg.textContent = '';
+    render(d.rows || []);
+  }
+
+  loginForm.addEventListener('submit', (e) => { e.preventDefault(); setPw(pwInput.value); load(); });
+  $('#reload').addEventListener('click', load);
+  $('#logout').addEventListener('click', () => showLogin(''));
+  if (getPw()) load(); else pwInput.focus();
+})();
+</script>
+</body>
+</html>
